@@ -1,1 +1,2 @@
-taiko prover core code for a3 testnet
+taiko prover core code for taiko-a4-yue
+

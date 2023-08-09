@@ -1,13 +1,12 @@
-use std::env::var;
-
 use clap::Parser;
 use env_logger::Env;
 
-use a3_prover::server::serve;
-use a3_prover::shared_state::SharedState;
+use prover::server::serve;
+use prover::shared_state::SharedState;
+use prover::VERSION;
 
 #[derive(Parser, Debug)]
-#[clap(version, about)]
+#[clap(version = VERSION, about)]
 /// This command starts a http/json-rpc server and serves proof oriented methods.
 pub(crate) struct ProverdConfig {
     #[clap(long, env = "PROVERD_BIND")]
@@ -22,16 +21,9 @@ pub(crate) struct ProverdConfig {
 #[tokio::main]
 async fn main() {
     let config = ProverdConfig::parse();
-    let mut builder = env_logger::Builder::from_env(Env::default().default_filter_or("info"));
-    builder.target(env_logger::Target::Stdout);
-    builder.init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    let max_tasks: usize = var("MAX_TASKS")
-    .unwrap_or_else(|_| "150".to_string())
-    .parse()
-    .expect("Cannot parse MAX_TASKS env var as usize");
-
-    let shared_state = SharedState::new(SharedState::random_worker_id(), config.lookup, max_tasks);
+    let shared_state = SharedState::new(SharedState::random_worker_id(), config.lookup);
     {
         // start the http server
         let h1 = serve(&shared_state, &config.bind);

@@ -1,3 +1,5 @@
+use crate::Fr;
+use bus_mapping::circuit_input_builder::Block;
 use bus_mapping::circuit_input_builder::BuilderClient;
 use bus_mapping::circuit_input_builder::CircuitsParams;
 use bus_mapping::mock::BlockData;
@@ -9,19 +11,22 @@ use eth_types::ToBigEndian;
 use eth_types::Word;
 use eth_types::H256;
 use ethers_providers::Http;
-use halo2_proofs::halo2curves::bn256::Fr;
 use std::str::FromStr;
 use zkevm_circuits::evm_circuit;
 use zkevm_circuits::pi_circuit::PublicData;
-use a3_zkevm_common::prover::CircuitConfig;
+use zkevm_circuits::witness::ProtocolInstance;
+use zkevm_common::prover::CircuitConfig;
+use zkevm_common::prover::ProofRequestOptions;
 
 /// Wrapper struct for circuit witness data.
 pub struct CircuitWitness {
     pub circuit_config: CircuitConfig,
     pub eth_block: eth_types::Block<eth_types::Transaction>,
     pub block: bus_mapping::circuit_input_builder::Block,
+    // dummy block for real data
+    pub dummy_block: Option<bus_mapping::circuit_input_builder::Block>,
     pub code_db: bus_mapping::state_db::CodeDB,
-    pub l1_txs: Vec<eth_types::Transaction>,
+    pub protocol_instance: ProtocolInstance,
 }
 
 impl CircuitWitness {
@@ -39,7 +44,10 @@ impl CircuitWitness {
             max_calldata: circuit_config.max_calldata,
             max_bytecode: circuit_config.max_bytecode,
             max_rws: circuit_config.max_rws,
-            keccak_padding: Some(circuit_config.keccak_padding),
+            max_copy_rows: circuit_config.max_copy_rows,
+            max_exp_steps: circuit_config.max_exp_steps,
+            max_evm_rows: circuit_config.pad_to,
+            max_keccak_rows: circuit_config.keccak_padding,
         };
         let empty_data = GethData {
             chain_id: Word::from(99),
@@ -58,25 +66,86 @@ impl CircuitWitness {
             circuit_config,
             eth_block: empty_data.eth_block,
             block: builder.block,
+            dummy_block: None,
             code_db: builder.code_db,
-            l1_txs: vec![],
+            protocol_instance: ProtocolInstance::default(),
         })
+    }
+
+    pub async fn dummy_with_request(request: &ProofRequestOptions) -> Result<Self, String> {
+        let url = Http::from_str(&request.rpc).map_err(|e| e.to_string())?;
+        let geth_client = GethClient::new(url);
+        let chain_id = geth_client
+            .get_chain_id()
+            .await
+            .map_err(|e| e.to_string())?;
+        let block = geth_client
+            .get_block_by_number((request.block).into())
+            .await
+            .map_err(|e| e.to_string())?;
+        let circuit_config =
+            crate::match_circuit_params!(block.gas_used.as_usize(), CIRCUIT_CONFIG, {
+                return Err(format!(
+                    "No circuit parameters found for block with gas used={}",
+                    block.gas_used
+                )
+                .into());
+            });
+
+        let circuits_params = CircuitsParams {
+            max_txs: circuit_config.max_txs,
+            max_calldata: circuit_config.max_calldata,
+            max_bytecode: circuit_config.max_bytecode,
+            max_rws: circuit_config.max_rws,
+            max_copy_rows: circuit_config.max_copy_rows,
+            max_exp_steps: circuit_config.max_exp_steps,
+            max_evm_rows: circuit_config.pad_to,
+            max_keccak_rows: circuit_config.keccak_padding,
+        };
+        let builder = BuilderClient::new(geth_client, circuits_params)
+            .await
+            .map_err(|e| e.to_string())?;
+        let (eth_block, _, history_hashes, prev_state_root) = builder
+            .get_block(request.block.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut w = Self::dummy(circuit_config)?;
+        w.protocol_instance = request.protocol_instance.clone().into();
+        w.eth_block = eth_block;
+
+        let dummy_block = Block::new(
+            chain_id.into(),
+            history_hashes,
+            prev_state_root,
+            &w.eth_block,
+            circuits_params,
+        )
+        .map_err(|e| e.to_string())?;
+        w.dummy_block = Some(dummy_block);
+        Ok(w)
+    }
+
+    pub async fn from_request(
+        request: &ProofRequestOptions,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut w = Self::from_rpc(&request.block, &request.rpc).await?;
+        w.protocol_instance = request.protocol_instance.clone().into();
+        Ok(w)
     }
 
     /// Gathers debug trace(s) from `rpc_url` for block `block_num`.
     /// Expects a go-ethereum node with debug & archive capabilities on `rpc_url`.
     pub async fn from_rpc(
         block_num: &u64,
-        l2_rpc_url: &str,
+        rpc_url: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let l2_url = Http::from_str(l2_rpc_url)?;
-        let l2_geth_client = GethClient::new(l2_url);
+        let url = Http::from_str(rpc_url)?;
+        let geth_client = GethClient::new(url);
         // TODO: add support for `eth_getHeaderByNumber`
-        let block = l2_geth_client
-            .get_block_by_number((*block_num).into())
-            .await?;
+        let block = geth_client.get_block_by_number((*block_num).into()).await?;
         let circuit_config =
-            crate::match_circuit_params_txs!(block.transactions.len(), CIRCUIT_CONFIG, {
+            crate::match_circuit_params!(block.gas_used.as_usize(), CIRCUIT_CONFIG, {
                 return Err(format!(
                     "No circuit parameters found for block with gas used={}",
                     block.gas_used
@@ -88,28 +157,49 @@ impl CircuitWitness {
             max_calldata: circuit_config.max_calldata,
             max_bytecode: circuit_config.max_bytecode,
             max_rws: circuit_config.max_rws,
-            keccak_padding: Some(circuit_config.keccak_padding),
+            max_copy_rows: circuit_config.max_copy_rows,
+            max_exp_steps: circuit_config.max_exp_steps,
+            max_evm_rows: circuit_config.pad_to,
+            max_keccak_rows: circuit_config.keccak_padding,
         };
-        let builder = BuilderClient::new(l2_geth_client, circuit_params).await?;
+        let builder = BuilderClient::new(geth_client, circuit_params).await?;
         let (builder, eth_block) = builder.gen_inputs(*block_num).await?;
 
         Ok(Self {
             circuit_config,
             eth_block,
             block: builder.block,
+            dummy_block: None,
             code_db: builder.code_db,
-            l1_txs: block.transactions,
+            protocol_instance: ProtocolInstance::default(),
         })
     }
 
     pub fn evm_witness(&self) -> zkevm_circuits::witness::Block<Fr> {
         let mut block =
             evm_circuit::witness::block_convert(&self.block, &self.code_db).expect("block_convert");
-        block.evm_circuit_pad_to = self.circuit_config.pad_to;
         block.exp_circuit_pad_to = self.circuit_config.pad_to;
-        // expect mock randomness
-        assert_eq!(block.randomness, Fr::from(0x100));
+        // fixed randomness used in PublicInput contract and SuperCircuit
+        block.randomness = Fr::from(0x100);
 
+        // fill protocol instance
+        block.protocal_instance = self.protocol_instance.clone();
+        block
+    }
+
+    pub fn dummy_evm_witness(&self) -> zkevm_circuits::witness::Block<Fr> {
+        let mut block =
+            evm_circuit::witness::block_convert(&self.block, &self.code_db).expect("block_convert");
+        block.exp_circuit_pad_to = self.circuit_config.pad_to;
+        // fixed randomness used in PublicInput contract and SuperCircuit
+        block.randomness = Fr::from(0x100);
+
+        if let Some(block_data) = &self.dummy_block {
+            block.context = (block_data).into();
+        };
+
+        // fill protocol instance
+        block.protocal_instance = self.protocol_instance.clone();
         block
     }
 
@@ -148,7 +238,21 @@ impl CircuitWitness {
             block_constants,
             prev_state_root,
             transactions: eth_block.transactions.clone(),
+            // block_hash: eth_block.hash.unwrap_or_default(),
             state_root: eth_block.state_root,
         }
+    }
+}
+
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_geth_client() {
+        let urlstr = "http://localhost:8545";
+        let url = Http::from_str(urlstr).unwrap();
+        let geth_client = GethClient::new(url);
+        let block = geth_client.get_block_by_number(102296.into()).await.unwrap();
+        println!("{:?}", block);
     }
 }

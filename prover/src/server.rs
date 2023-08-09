@@ -5,11 +5,11 @@ use hyper::body::HttpBody;
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use a3_zkevm_common::json_rpc::JsonRpcError;
-use a3_zkevm_common::json_rpc::JsonRpcRequest;
-use a3_zkevm_common::json_rpc::JsonRpcResponse;
-use a3_zkevm_common::json_rpc::JsonRpcResponseError;
-use a3_zkevm_common::prover::*;
+use zkevm_common::json_rpc::JsonRpcError;
+use zkevm_common::json_rpc::JsonRpcRequest;
+use zkevm_common::json_rpc::JsonRpcResponse;
+use zkevm_common::json_rpc::JsonRpcResponseError;
+use zkevm_common::prover::*;
 
 /// Starts the proverd json-rpc server.
 /// Note: the server may not immediately listening after returning the
@@ -185,12 +185,12 @@ async fn handle_method(
             let options: ProofRequestOptions =
                 serde_json::from_value(options.to_owned()).map_err(|e| e.to_string())?;
 
-            let witness = CircuitWitness::from_rpc(&options.block, &options.l2_rpc)
+            let witness = CircuitWitness::from_rpc(&options.block, &options.rpc)
                 .await
                 .map_err(|e| e.to_string())?;
 
             let circuit_config =
-                crate::match_circuit_params_txs!(witness.l1_txs.len(), CIRCUIT_CONFIG, {
+                crate::match_circuit_params!(witness.gas_used(), CIRCUIT_CONFIG, {
                     return Err(format!(
                         "No circuit parameters found for block with gas={}",
                         witness.gas_used()

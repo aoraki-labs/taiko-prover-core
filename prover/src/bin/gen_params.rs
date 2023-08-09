@@ -1,5 +1,5 @@
 use halo2_proofs::poly::commitment::Params;
-use a3_prover::ProverParams;
+use prover::ProverParams;
 use rand::rngs::OsRng;
 use std::env;
 use std::fs::File;
@@ -17,7 +17,7 @@ fn main() {
         .expect("valid number");
     let mut file = File::create(&params_path).expect("Failed to create file");
 
-    println!("Generating params with degree: {}", degree);
+    println!("Generating params with degree: {degree}");
 
     let general_params = ProverParams::setup(degree, OsRng);
     let mut buf = Vec::new();
@@ -27,5 +27,5 @@ fn main() {
     file.write_all(&buf[..])
         .expect("Failed to write params to file");
 
-    println!("Written to {}", params_path);
+    println!("Written to {params_path}");
 }
