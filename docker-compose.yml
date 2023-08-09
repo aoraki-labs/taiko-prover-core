@@ -89,7 +89,7 @@ services:
       --password /dev/null
       --allow-insecure-unlock
       --nodiscover
-      --miner.gaslimit 40000000
+      --miner.gaslimit 100000000000
       --mine
       --http
       --http.addr "[::]"
@@ -136,9 +136,6 @@ services:
       - PROVERD_LOOKUP=prover-rpcd:8545
     deploy:
       replicas: 1
-      resources:
-        limits:
-          memory: 2500G
 
   coverage-l1:
     profiles:
@@ -198,10 +195,6 @@ services:
     command: '-'
     tty: true
     init: true
-    deploy:
-      resources:
-        limits:
-          memory: 2500G
 
   web:
     depends_on:

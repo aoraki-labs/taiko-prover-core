@@ -77,7 +77,7 @@ pub async fn jsonrpc_request_client<T: Serialize + Send + Sync, R: DeserializeOw
         json
     })
     .await
-    .map_err(|err| format!("jsonrpc: uri={uri} method={method} error={err}"))?;
+    .map_err(|e| e.to_string())?;
 
     if json.error.is_some() {
         return Err(json.error.unwrap().message);

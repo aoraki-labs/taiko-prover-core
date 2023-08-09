@@ -9,8 +9,7 @@ contract HeaderUtil {
     bytes32 blockHash,
     bytes32 stateRoot,
     uint256 blockNumber,
-    uint256 blockGasUsed,
-    uint256 blockTimestamp
+    uint256 blockGasUsed
   ) {
     assembly {
       //@INCLUDE:utils.yul
@@ -21,21 +20,13 @@ contract HeaderUtil {
       require(eq(nItems, 15), "BLOCK_ITEMS")
 
       // boundary check
-      let end := add(blockHeader.offset, blockHeader.length)
-      require(
-        or(
-          lt(calldataPtr, end),
-          eq(calldataPtr, end)
-        ),
-        "BOUNDS"
-      )
+      require(lt(calldataPtr, add(blockHeader.offset, blockHeader.length)), "BOUNDS")
 
       blockHash := hash
       parentHash := loadValue(memStart, 0)
       stateRoot := loadValue(memStart, 3)
       blockNumber := loadValue(memStart, 8)
       blockGasUsed := loadValue(memStart, 10)
-      blockTimestamp := loadValue(memStart, 11)
     }
   }
 }

@@ -74,7 +74,7 @@ contract PublicInput {
         }
       }
 
-      function appendCallDataRow (value) {
+      function appendCallDataRow (txId, index, value) {
         let callframe := mload(96)
 
         // advance raw_public_inputs
@@ -83,11 +83,20 @@ contract PublicInput {
           let ptr := add(callframe, 64)
 
           // increment index
-          let rpi_ptr_call_data := mload(ptr)
-          mstore(ptr, add(rpi_ptr_call_data, 32))
+          let rpi_ptr := mload(ptr)
+          mstore(ptr, add(rpi_ptr, 32))
 
-          // calldata byte
-          mstore(rpi_ptr_call_data, value)
+          // tx_id_col
+          mstore(rpi_ptr, txId)
+
+          let id_index_value_spread := mload(add(callframe, 96))
+          // index_col
+          rpi_ptr := add(rpi_ptr, id_index_value_spread)
+          mstore(rpi_ptr, index)
+
+          // value_col
+          rpi_ptr := add(rpi_ptr, id_index_value_spread)
+          mstore(rpi_ptr, value)
         }
       }
 
@@ -106,15 +115,14 @@ contract PublicInput {
       // 128..160: callframe.calldataBytes
       table := add(table, 160)
       {
-        // hashes(256) + block(8) + extra(2)
-        let BLOCK_FIELDS := 266
+        // hashes(256) + block(8) + extra(3)
+        let BLOCK_FIELDS := 267
         let TX_FIELDS := 10
         let MAX_TX_FIELDS := mul(TX_FIELDS, MAX_TXS)
-        let TX_TABLE_LEN := add(MAX_TX_FIELDS, 1)
-
-        let N_RAW_INPUTS := add(BLOCK_FIELDS, mul(3, TX_TABLE_LEN))
-        N_RAW_INPUTS := add(N_RAW_INPUTS, MAX_CALLDATA)
-
+        let N_FIELDS := add(MAX_TX_FIELDS, MAX_CALLDATA)
+        // initial zero row
+        N_FIELDS := add(1, N_FIELDS)
+        let N_RAW_INPUTS := add(BLOCK_FIELDS, mul(3, N_FIELDS))
         let N_INSTANCE_VALUES := 5
         // uint256[].length
         mstore(table, N_INSTANCE_VALUES)
@@ -146,17 +154,14 @@ contract PublicInput {
         calldatacopy(callframe, calldatasize(), 160)
 
         // callframe.rpi_ptr_call_data
-        {
-          let valueOffset := add(BLOCK_FIELDS, mul(TX_TABLE_LEN, 3))
-          mstore(add(callframe, 64), add(endOfRows, mul(valueOffset, 32)))
-        }
+        mstore(add(callframe, 64), add(endOfRows, mul(add(BLOCK_FIELDS, MAX_TX_FIELDS), 32)))
 
         // callframe.id_index_value_spread
         mstore(
           add(callframe, 96),
           mul(
             32,
-            TX_TABLE_LEN
+            add(1, add(mul(TX_FIELDS, MAX_TXS), MAX_CALLDATA))
           )
         )
       }
@@ -198,7 +203,7 @@ contract PublicInput {
 
         // extra fields
         // block hash
-        // append(rlc(hash))
+        append(rlc(hash))
         // stateRoot
         {
           let stateRoot := rlc(loadValue(values, 3))
@@ -224,6 +229,7 @@ contract PublicInput {
       {
         // initial zero row
         appendTxRow(0, 0, 0)
+        appendCallDataRow(0, 0, 0)
 
         let txId := 0
         for {} lt(dataOffset, dataOffsetTail) {} {
@@ -299,7 +305,7 @@ contract PublicInput {
             let zeroBytes
             for { let i := 0 } lt(i, txInputLen) { i := add(i, 1) } {
               let val := byte(0, calldataload(add(txInputOffset, i)))
-              appendCallDataRow(val)
+              appendCallDataRow(txId, i, val)
 
               zeroBytes := add(zeroBytes, iszero(val))
             }

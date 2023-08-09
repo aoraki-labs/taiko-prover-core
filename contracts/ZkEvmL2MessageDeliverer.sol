@@ -3,8 +3,7 @@ pragma solidity <0.9.0;
 
 import './ZkEvmMessageDelivererBase.sol';
 import './interfaces/IZkEvmMessageDelivererWithProof.sol';
-import './generated/PatriciaAccountValidator.sol';
-import './generated/PatriciaStorageValidator.sol';
+import './generated/PatriciaValidator.sol';
 import './ZkEvmStorage.sol';
 import './generated/CommonBlockOperations.sol';
 
@@ -12,45 +11,23 @@ contract ZkEvmL2MessageDeliverer is
   ZkEvmMessageDelivererBase,
   IZkEvmMessageDelivererWithProof,
   ZkEvmStorage,
-  PatriciaAccountValidator,
-  PatriciaStorageValidator,
+  PatriciaValidator,
   CommonBlockOperations
 {
   // TODO: decide on public getters once L1/L2 Inbox is DRY
-  // Latest known L1 block hash
-  bytes32 lastKnownL1BlockHash;
-  // Mapping from <storage root of L1 bridge> to L1 block timestamp
-  mapping (bytes32 => uint256) storageRootToTimestamp;
+  // state root of L1
+  bytes32 originStateRoot;
+  // timestamp of L1
+  uint256 originTimestamp;
 
-  /// @inheritdoc IZkEvmMessageDelivererWithProof
-  function getTimestampForStorageRoot (bytes32 val) public view returns (uint256) {
-    return storageRootToTimestamp[val];
-  }
-
-  /// @dev `blockNumber` & `blockHash` must be checked by the L1 verification step(s).
-  function importForeignBlock (
-    uint256 /*blockNumber*/,
-    bytes32 blockHash
-  ) external {
-    _onlyEOA();
-    // should be restricted to block producer set
-    // require(msg.sender == block.coinbase, 'IBH');
-    lastKnownL1BlockHash = blockHash;
-  }
-
-  /// @inheritdoc IZkEvmMessageDelivererWithProof
-  function importForeignBridgeState (bytes calldata blockHeader, bytes calldata accountProof) external {
+  /// @notice This method imports [stateRoot, timestamp] of a block header.
+  /// `blockNumber` & `blockHash` must be checked by the L1 verification step(s).
+  function importBlockHeader (uint256 /*blockNumber*/, bytes32 blockHash, bytes calldata blockHeader) external {
     (bytes32 hash, bytes32 stateRoot, uint256 timestamp) = _readBlockHeader(blockHeader);
-    require(hash == lastKnownL1BlockHash, 'HASH');
+    require(hash == blockHash, 'HASH');
 
-    (bytes32 proofStateRoot, bytes32 proofStorageRoot) = _validatePatriciaAccountProof(
-      L1_BRIDGE,
-      accountProof
-    );
-    require(proofStateRoot == stateRoot, 'DMROOT');
-    storageRootToTimestamp[proofStorageRoot] = timestamp;
-
-    emit ForeignBridgeStateImported(hash, stateRoot, timestamp);
+    originStateRoot = stateRoot;
+    originTimestamp = timestamp;
   }
 
   /// @inheritdoc IZkEvmMessageDelivererWithProof
@@ -62,19 +39,19 @@ contract ZkEvmL2MessageDeliverer is
     uint256 deadline,
     uint256 nonce,
     bytes calldata data,
-    bytes calldata storageProof
+    bytes calldata proof
   ) external {
+    _onlyEOA();
     // avoid calling the 'requestETH' or any other 'administrative' functions from L2_DELIVERER
     require(to != L2_DISPATCHER, 'TNED');
 
     bytes32 messageHash = keccak256(abi.encode(from, to, value, fee, deadline, nonce, data));
-    (bytes32 storageRoot, bytes32 storageValue) = _validatePatriciaStorageProof(
+    (bytes32 proofRoot, bytes32 storageValue) = _validatePatriciaProof(
+      L1_BRIDGE,
       _PENDING_MESSAGE_KEY(messageHash),
-      storageProof
+      proof
     );
-    uint256 originTimestamp = storageRootToTimestamp[storageRoot];
-    require(originTimestamp != 0, 'STROOT');
-    require(originTimestamp < deadline, 'DMTS');
+    require(proofRoot == originStateRoot, 'DMROOT');
     require(storageValue == bytes32(uint256(1)), 'DMVAL');
 
     _deliverMessage(from, to, value, fee, deadline, nonce, data);

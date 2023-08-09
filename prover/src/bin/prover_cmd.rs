@@ -1,7 +1,7 @@
 use env_logger::Env;
-use prover::shared_state::SharedState;
+use a3_prover::shared_state::SharedState;
 use std::env::var;
-use zkevm_common::prover::*;
+use a3_zkevm_common::prover::*;
 
 /// This command generates and prints the proofs to stdout.
 /// Required environment variables:
@@ -25,11 +25,11 @@ async fn main() {
         .parse()
         .expect("Cannot parse PROVERD_PARAMS_PATH env var");
 
-    let state = SharedState::new(String::new(), None);
+    let state = SharedState::new(String::new(), None, 100);
     let request = ProofRequestOptions {
         circuit: "super".to_string(),
         block: block_num,
-        rpc: rpc_url,
+        l2_rpc: rpc_url,
         retry: false,
         param: Some(params_path),
         mock: false,

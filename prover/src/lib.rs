@@ -1,17 +1,14 @@
-pub use halo2_proofs::halo2curves::bn256::Bn256;
-pub use halo2_proofs::halo2curves::bn256::Fq;
-pub use halo2_proofs::halo2curves::bn256::Fr;
-pub use halo2_proofs::halo2curves::bn256::G1Affine;
+use halo2_proofs::halo2curves::bn256::Bn256;
+use halo2_proofs::halo2curves::bn256::G1Affine;
 use halo2_proofs::plonk::ProvingKey;
 use halo2_proofs::poly::kzg::commitment::KZGCommitmentScheme;
 use halo2_proofs::poly::kzg::commitment::ParamsKZG;
-
-pub const VERSION: &str = env!("PROVER_VERSION");
 
 pub type ProverParams = ParamsKZG<Bn256>;
 pub type ProverCommitmentScheme = KZGCommitmentScheme<Bn256>;
 pub type ProverKey = ProvingKey<G1Affine>;
 
+// pub mod aggregation_circuit;
 pub mod circuit_autogen;
 pub mod circuit_witness;
 pub mod circuits;

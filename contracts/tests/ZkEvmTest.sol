@@ -1,28 +1,37 @@
 // SPDX-License-Identifier: MIT
 pragma solidity <0.9.0;
 
-import '../generated/PatriciaAccountValidator.sol';
-import '../generated/PatriciaStorageValidator.sol';
+import '../generated/PatriciaValidator.sol';
+import '../generated/InstanceVerifier.sol';
 import '../generated/PublicInput.sol';
 
-contract ZkEvmTest is PatriciaAccountValidator, PatriciaStorageValidator, PublicInput {
+contract ZkEvmTest is PatriciaValidator, InstanceVerifier, PublicInput {
   function testPatricia (
     address account,
     bytes32 storageKey,
-    bytes calldata accountProof,
-    bytes calldata storageProof
-  ) external pure returns (bytes32 _stateRoot, bytes32 _storageValue) {
-    (bytes32 proofStateRoot, bytes32 proofStorageRoot) = _validatePatriciaAccountProof(
-      account,
-      accountProof
-    );
-    (bytes32 storageRoot, bytes32 storageValue) = _validatePatriciaStorageProof(
-      storageKey,
-      storageProof
-    );
-    require(storageRoot == proofStorageRoot, 'STROOT');
+    bytes calldata proofData
+  ) external pure returns (bytes32 stateRoot, bytes32 storageValue) {
+    return _validatePatriciaProof(account, storageKey, proofData);
+  }
 
-    return (proofStateRoot, storageValue);
+  function testPublicInput(
+    uint256 MAX_TXS,
+    uint256 MAX_CALLDATA,
+    uint256 chainId,
+    uint256 parentStateRoot,
+    bytes calldata witness
+  ) external pure returns (uint256[] memory) {
+    (uint256[] memory publicInput,) =
+      _buildTable(MAX_TXS, MAX_CALLDATA, chainId, parentStateRoot, witness, false);
+
+    // Use of assembly here because it otherwise does
+    // a whole copy of `publicInput`.
+    assembly {
+      let ptr := sub(publicInput, 32)
+      mstore(ptr, 0x20)
+      let len := add(mul(mload(publicInput), 32), 64)
+      return(ptr, len)
+    }
   }
 
   function testPublicInputCommitment(
