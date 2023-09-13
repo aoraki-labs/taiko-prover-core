@@ -16,11 +16,14 @@ use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::SerdeFormat;
 use hyper::Uri;
 use rand::{thread_rng, Rng};
+use snark_verifier::loader::evm;
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 use snark_verifier_sdk::GWC;
 use snark_verifier_sdk::evm::gen_evm_proof_gwc;
 use snark_verifier_sdk::halo2::gen_snark_gwc;
 use snark_verifier_sdk::CircuitExt;
+use zkevm_circuits::root_circuit::Config;
+use zkevm_circuits::root_circuit::pcd_aggregation::AccumulationSchemeType;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs::File;
@@ -34,6 +37,7 @@ use zkevm_circuits::root_circuit::PCDAggregationCircuit;
 use zkevm_circuits::util::SubCircuit;
 use zkevm_common::json_rpc::jsonrpc_request_client;
 use zkevm_common::prover::*;
+use circuit_benchmarks::super_circuit::{gen_verifier, evm_verify};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -42,8 +46,7 @@ lazy_static! {
     };
 }
 
-
-const TAIKO_A4_CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
+const TAIKO_A5_CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
     block_gas_limit: 800000,
     max_txs: 14,
     max_calldata: 69750,
@@ -53,9 +56,11 @@ const TAIKO_A4_CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
     max_exp_steps: 27900,
     min_k: 18,
     pad_to: 3161966,
-    min_k_aggregation: 21,
+    min_k_aggregation: 22,
     keccak_padding: 1600000,
 };
+
+
 
 fn get_param_path(path: &String, k: usize) -> PathBuf {
     // try to automatically choose a file if the path is a folder.
@@ -65,6 +70,30 @@ fn get_param_path(path: &String, k: usize) -> PathBuf {
         Path::new(path).to_path_buf()
     }
 }
+
+//generate the pk
+async fn gen_pk_core<C: Circuit<Fr>>(
+    _cache_key: &str,
+    param: &Arc<ProverParams>,
+    circuit: &C,
+    aux: &mut ProofResultInstrumentation,
+) -> Result<Arc<ProverKey>,String> {
+    let vk = {
+        let time_started = Instant::now();
+        let vk = keygen_vk(param.as_ref(), circuit).unwrap();
+        aux.vk = Instant::now().duration_since(time_started).as_millis() as u32;
+        vk
+    };
+    let pk = {
+        let time_started = Instant::now();
+        let pk = keygen_pk(param.as_ref(), vk, circuit).unwrap();
+        aux.pk = Instant::now().duration_since(time_started).as_millis() as u32;
+        pk
+    };
+    let pk = Arc::new(pk);
+    Ok(pk)
+}
+
 
 pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: String, l1_signal_service:String ,l2_signal_service:String ,taiko_12:String ,
     meta_hash: String, blockhash: String, parenthash:String ,signalroot:String ,graffiti:String ,gasused:u64 ,parentgasused:u64,blockmaxgasimit:u64,maxtransactionsperblock:u64,maxbytespertxlist:u64) -> Result<ProofResult,String>{
@@ -112,19 +141,19 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     let mut aggregation_proof = ProofResult::default();
 
     let circuit = gen_super_circuit::<
-    { TAIKO_A4_CIRCUIT_CONFIG.max_txs },
-    { TAIKO_A4_CIRCUIT_CONFIG.max_calldata },
-    { TAIKO_A4_CIRCUIT_CONFIG.max_rws },
-    { TAIKO_A4_CIRCUIT_CONFIG.max_copy_rows },
+    { TAIKO_A5_CIRCUIT_CONFIG.max_txs },
+    { TAIKO_A5_CIRCUIT_CONFIG.max_calldata },
+    { TAIKO_A5_CIRCUIT_CONFIG.max_rws },
+    { TAIKO_A5_CIRCUIT_CONFIG.max_copy_rows },
     _,>(&witness, fixed_rng()).unwrap();
 
-    let universe_k = TAIKO_A4_CIRCUIT_CONFIG.min_k.max(TAIKO_A4_CIRCUIT_CONFIG.min_k_aggregation); //21
-    let (base_param, _) = get_or_gen_param_core(universe_k);
+    let universe_k = TAIKO_A5_CIRCUIT_CONFIG.min_k.max(TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation); //22
+    let (base_param, _) = get_or_gen_param(&task_options,universe_k);
     let mut aggregation_param = (*base_param).clone();
     let mut circuit_param = aggregation_param.clone();
 
-    if circuit_param.k() as usize > TAIKO_A4_CIRCUIT_CONFIG.min_k {
-        circuit_param.downsize(TAIKO_A4_CIRCUIT_CONFIG.min_k as u32);
+    if circuit_param.k() as usize > TAIKO_A5_CIRCUIT_CONFIG.min_k {
+        circuit_param.downsize(TAIKO_A5_CIRCUIT_CONFIG.min_k as u32);
         circuit_proof.k = circuit_param.k() as u8;
     }
     circuit_proof.k = circuit_param.k() as u8;
@@ -151,14 +180,18 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     let snark = gen_snark_gwc(&circuit_param, &pk, circuit, None::<&str>);
     circuit_proof.proof = snark.proof.clone().into();
     
-    if aggregation_param.k() as usize > TAIKO_A4_CIRCUIT_CONFIG.min_k_aggregation {
-        aggregation_param.downsize(TAIKO_A4_CIRCUIT_CONFIG.min_k_aggregation as u32);
+    if aggregation_param.k() as usize > TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation {
+        aggregation_param.downsize(TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation as u32);
         aggregation_proof.k = aggregation_param.k() as u8;
     }
+
     let agg_params = aggregation_param.clone();
     aggregation_proof.k = agg_params.k() as u8;
     let agg_circuit = {
+        let time_started = Instant::now();
         let v = PCDAggregationCircuit::<GWC>::new(&agg_params, [snark]).unwrap();
+        aggregation_proof.aux.circuit =
+                    Instant::now().duration_since(time_started).as_millis() as u32;
         v
     };
     let agg_pk = match pk_map.get("super-agg") {       
@@ -175,7 +208,24 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     aggregation_proof.instance = collect_instance_hex(&agg_instance);
     let proof = {
         let time_started = Instant::now();
+        let num_instances = agg_circuit.num_instance().clone();
+        let instances = agg_circuit.instance().clone();
+        let accumulator_indices = Some(agg_circuit.accumulator_indices());
         let v = gen_evm_proof_gwc(&agg_params, &agg_pk, agg_circuit, agg_instance);
+        #[cfg(feature = "evm_verifier")]
+        {
+            let deployment_code = gen_verifier(
+                &agg_params,
+                &agg_pk.get_vk(),
+                Config::kzg()
+                    .with_num_instance(num_instances.clone())
+                    .with_accumulator_indices(accumulator_indices),
+                num_instances,
+                AccumulationSchemeType::GwcType,
+            );
+            let evm_verifier_bytecode = evm::compile_yul(&deployment_code);
+            evm_verify(evm_verifier_bytecode, instances, v.clone());
+        }
         aggregation_proof.aux.proof =
             Instant::now().duration_since(time_started).as_millis() as u32;
         v
@@ -184,43 +234,7 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     aggregation_proof.proof = proof.into();
     Ok(aggregation_proof)
 
-
 }
-
-//read the kzg param file
-fn get_or_gen_param_core(k:usize) -> (Arc<ProverParams>, String) {
-    let path = format!("./kzg_bn254_{}.srs", k);
-    let file = File::open(&path).expect("open exist param successfully");
-    let params = Arc::new(
-        ProverParams::read(&mut std::io::BufReader::new(file))
-            .expect("Failed to read params"),
-    );
-    (params, path.as_str().to_string())   
-}
-
-//generate the pk
-async fn gen_pk_core<C: Circuit<Fr>>(
-    _cache_key: &str,
-    param: &Arc<ProverParams>,
-    circuit: &C,
-    aux: &mut ProofResultInstrumentation,
-) -> Result<Arc<ProverKey>,String> {
-    let vk = {
-        let time_started = Instant::now();
-        let vk = keygen_vk(param.as_ref(), circuit).unwrap();
-        aux.vk = Instant::now().duration_since(time_started).as_millis() as u32;
-        vk
-    };
-    let pk = {
-        let time_started = Instant::now();
-        let pk = keygen_pk(param.as_ref(), vk, circuit).unwrap();
-        aux.pk = Instant::now().duration_since(time_started).as_millis() as u32;
-        pk
-    };
-    let pk = Arc::new(pk);
-    Ok(pk)
-}
-
 
 
 fn get_or_gen_param(task_options: &ProofRequestOptions, k: usize) -> (Arc<ProverParams>, String) {
@@ -251,7 +265,7 @@ fn get_or_gen_param(task_options: &ProofRequestOptions, k: usize) -> (Arc<Prover
     }
 }
 
-pub async fn compute_proof<C: Circuit<Fr> + Clone + SubCircuit<Fr> + CircuitExt<Fr>>(
+async fn compute_proof<C: Circuit<Fr> + Clone + SubCircuit<Fr> + CircuitExt<Fr>>(
     shared_state: &SharedState,
     task_options: &ProofRequestOptions,
     circuit_config: CircuitConfig,
@@ -341,7 +355,7 @@ pub async fn compute_proof<C: Circuit<Fr> + Clone + SubCircuit<Fr> + CircuitExt<
 
             let agg_pk = {
                 let cache_key = format!(
-                    "{}{}{:?}ag",
+                    "{}-agg-{}{:?}",
                     &task_options.circuit, &agg_param_path, &circuit_config
                 );
                 shared_state
@@ -358,7 +372,26 @@ pub async fn compute_proof<C: Circuit<Fr> + Clone + SubCircuit<Fr> + CircuitExt<
             aggregation_proof.instance = collect_instance_hex(&agg_instance);
             let proof = {
                 let time_started = Instant::now();
+                let num_instances = agg_circuit.num_instance().clone();
+                let instances = agg_circuit.instance().clone();
+                let accumulator_indices = Some(agg_circuit.accumulator_indices());
+
                 let v = gen_evm_proof_gwc(&agg_params, &agg_pk, agg_circuit, agg_instance);
+                #[cfg(feature = "evm_verifier")]
+                {
+                    let deployment_code = gen_verifier(
+                        &agg_params,
+                        &agg_pk.get_vk(),
+                        Config::kzg()
+                            .with_num_instance(num_instances.clone())
+                            .with_accumulator_indices(accumulator_indices),
+                        num_instances,
+                        AccumulationSchemeType::GwcType,
+                    );
+                    let evm_verifier_bytecode = evm::compile_yul(&deployment_code);
+                    evm_verify(evm_verifier_bytecode, instances, v.clone());
+                }
+
                 aggregation_proof.aux.proof =
                     Instant::now().duration_since(time_started).as_millis() as u32;
                 v
@@ -387,7 +420,7 @@ pub async fn compute_proof<C: Circuit<Fr> + Clone + SubCircuit<Fr> + CircuitExt<
                 circuit,
                 circuit_instance.clone(),
                 fixed_rng(),
-                task_options.mock_feedback,
+                true,
                 task_options.verify_proof,
                 &mut circuit_proof.aux,
             );
@@ -912,5 +945,115 @@ impl SharedState {
         }
 
         node_id
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use eth_types::Address;
+    use eth_types::H256;
+    use eth_types::ToBigEndian;
+    use eth_types::ToWord;
+    use ethers_core::abi::encode;
+    use ethers_core::abi::Token;
+    use ethers_core::utils::keccak256;
+    use hex::ToHex;
+
+    fn parse_hash(input: &str) -> H256 {
+        H256::from_slice(&hex::decode(input).expect("parse_hash"))
+    }
+
+     fn parse_address(input: &str) -> Address {
+        Address::from_slice(&hex::decode(input).expect("parse_address"))
+    }
+
+    #[test]
+    fn test_abi_enc_hash() {
+            let meta_hash   = "e7c4698134a4c5dce0c885ea9e202be298537756bb363750256ed0c5a603ff11";
+            let block_hash  = "b58dfe193fb44bd3b99398910ffc3da6176665617aff46bcf9bc218fb87a0ebd";
+            let parent_hash = "2d6ff9593ec597e5d90752ea68f43ba69df5b89ab17eadbbdcdd3e11b7e17ea3";
+            let signal_root = "25f5352342833794e6c468e5818cd88163fff61963891a7237a48567cb88b597";
+            let graffiti = "6162630000000000000000000000000000000000000000000000000000000000";
+            let prover = "70997970C51812dc3A010C7d01b50e0d17dc79C8";
+
+        let pi = Token::FixedArray(vec![
+            Token::FixedBytes(parse_hash(meta_hash).to_word().to_be_bytes().into()),
+            Token::FixedBytes(parse_hash(parent_hash).to_word().to_be_bytes().into()),
+            Token::FixedBytes(parse_hash(block_hash).to_word().to_be_bytes().into()),
+            Token::FixedBytes(parse_hash(signal_root).to_word().to_be_bytes().into()),
+            Token::FixedBytes(parse_hash(graffiti).to_word().to_be_bytes().into()),
+            Token::Address(parse_address(prover)),
+        ]);
+
+        let buf = encode(&[pi]);
+        let hash = keccak256(&buf);
+        println!("hash={:?}", hash.encode_hex::<String>());
+    }
+
+    #[tokio::test]
+    async fn test_dummy_proof_gen() -> Result<(), String> {
+        let ss = SharedState::new("1234".to_owned(), None);
+        const CIRCUIT_CONFIG: CircuitConfig = crate::match_circuit_params!(100, CIRCUIT_CONFIG, {
+            panic!();
+        });
+        let protocol_instance = RequestExtraInstance {
+            l1_signal_service: "23baAc3892a823e9E59B85d6c90068474fe60086".to_string(),
+            l2_signal_service: "1000777700000000000000000000000000000007".to_string(),
+            l2_contract: "1000777700000000000000000000000000000001".to_string(),
+            meta_hash: "ba97517eb3553f0c355d68392493f8b08aaafcd4b05dc6759889c421316cccfb"
+                .to_string(),
+            block_hash: "f9101063257478d306ac9d826927eae60c1c9b7db6fd2fe68aa249739221f611"
+                .to_string(),
+            parent_hash: "cc9e3bcb7273a75b5f5b77c22c7878506eabb2d2308390a717a52d80c63926d8"
+                .to_string(),
+            signal_root: "d215c65a2b8ffc53f7b7659dc0a5cab2a5044c3cf71524e36e60d8aa8d4bb173"
+                .to_string(),
+            graffiti: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            prover: "6C671d2C641CE1b99F17755fd45441fa4326C3B1".to_string(),
+            gas_used: 1605944,
+            parent_gas_used: 3984953,
+            block_max_gas_limit: 6000000,
+            max_transactions_per_block: 79,
+            max_bytes_per_tx_list: 120000,
+        };
+
+        let mut dummy_req = ProofRequestOptions {
+            circuit: "super".to_string(),
+            block: 30,
+            rpc: "https://rpc.internal.taiko.xyz".to_string(),
+            protocol_instance: protocol_instance.clone(),
+            param: Some("../param".to_string()),
+            aggregate: true,
+            retry: true,
+            mock: false,
+            mock_feedback: false,
+            verify_proof: true,
+        };
+
+        dummy_req.aggregate = true;
+        dummy_req.param = Some("../param".to_string());
+        dummy_req.protocol_instance = protocol_instance.clone();
+        dummy_req.mock = false;
+
+        let mut witness = CircuitWitness::dummy_with_request(&dummy_req).await.unwrap();
+        witness.protocol_instance = protocol_instance.clone().into();
+        let super_circuit = gen_super_circuit::<
+            { CIRCUIT_CONFIG.max_txs },
+            { CIRCUIT_CONFIG.max_calldata },
+            { CIRCUIT_CONFIG.max_rws },
+            { CIRCUIT_CONFIG.max_copy_rows },
+            _,
+        >(&witness, fixed_rng())
+        .unwrap();
+
+
+        println!("ready to compute proof");
+        let proof = compute_proof(&ss, &dummy_req, CIRCUIT_CONFIG, super_circuit)
+            .await
+            .unwrap();
+        println!("proof={:?}", proof);
+        Ok(())
     }
 }
