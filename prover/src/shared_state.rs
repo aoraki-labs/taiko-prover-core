@@ -71,6 +71,17 @@ fn get_param_path(path: &String, k: usize) -> PathBuf {
     }
 }
 
+//read the kzg param file
+fn get_or_gen_param_core(k:usize) -> (Arc<ProverParams>, String) {
+    let path = format!("./kzg_bn254_{}.srs", k);
+    let file = File::open(&path).expect("open exist param successfully");
+    let params = Arc::new(
+        ProverParams::read(&mut std::io::BufReader::new(file))
+            .expect("Failed to read params"),
+    );
+    (params, path.as_str().to_string())   
+}
+
 //generate the pk
 async fn gen_pk_core<C: Circuit<Fr>>(
     _cache_key: &str,
@@ -148,7 +159,8 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     _,>(&witness, fixed_rng()).unwrap();
 
     let universe_k = TAIKO_A5_CIRCUIT_CONFIG.min_k.max(TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation); //22
-    let (base_param, _) = get_or_gen_param(&task_options,universe_k);
+    // let (base_param, _) = get_or_gen_param(&task_options,universe_k);
+    let (base_param, _) = get_or_gen_param_core(universe_k);
     let mut aggregation_param = (*base_param).clone();
     let mut circuit_param = aggregation_param.clone();
 
