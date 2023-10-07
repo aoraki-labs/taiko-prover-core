@@ -39,6 +39,7 @@ use zkevm_common::json_rpc::jsonrpc_request_client;
 use zkevm_common::prover::*;
 use circuit_benchmarks::super_circuit::{gen_verifier, evm_verify};
 use lazy_static::lazy_static;
+const RETRY: usize = 3;
 
 lazy_static! {
     pub static ref PK_CACHE: Arc<Mutex<HashMap<String, Arc<ProverKey>>>> = {
@@ -47,8 +48,8 @@ lazy_static! {
 }
 
 const TAIKO_A5_CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
-    block_gas_limit: 800000,
-    max_txs: 14,
+    block_gas_limit: 820000,
+    max_txs: 80,
     max_calldata: 69750,
     max_bytecode: 139500,
     max_rws: 3161966,
@@ -105,6 +106,26 @@ async fn gen_pk_core<C: Circuit<Fr>>(
     Ok(pk)
 }
 
+pub async fn generate_witness(request: &ProofRequestOptions) -> Result<CircuitWitness, Box<dyn std::error::Error>>{
+    let mut retry : usize = 0;
+    loop {
+        if retry==RETRY {
+            return Err(format!(
+                "generate witness error occured"
+            )
+            .into());
+        }
+        let witness = match CircuitWitness::dummy_with_request(request).await{
+            Ok(r) => r,
+            Err(_) => {
+                retry=retry+1;
+                continue;
+            },
+        }; 
+        return Ok(witness)
+    }
+}
+
 
 pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: String, l1_signal_service:String ,l2_signal_service:String ,taiko_12:String ,
     meta_hash: String, blockhash: String, parenthash:String ,signalroot:String ,graffiti:String ,gasused:u64 ,parentgasused:u64,blockmaxgasimit:u64,maxtransactionsperblock:u64,maxbytespertxlist:u64) -> Result<ProofResult,String>{
@@ -137,11 +158,11 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
 
     info!("block task prara is {:?}",task_options);
 
-    info!("zkpool:start to generate the witness of block:{}",block);
-    let mut witness = match CircuitWitness::dummy_with_request(&task_options).await{
+    info!("zkpool:start to generate the witness of block:{:?}",block);
+    let mut witness = match generate_witness(&task_options).await{
         Ok(r) => r,
         Err(e) => {
-            info!("get witness data error");
+            info!("get witness data error of block:{}",block);
             return Err(e.to_string())
         },
     };
