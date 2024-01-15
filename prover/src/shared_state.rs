@@ -9,6 +9,14 @@ use crate::ProverKey;
 use crate::ProverParams;
 use tracing::{error, info};
 
+#[cfg(feature = "evm-verifier")]
+mod evm_verifier_helper {
+    pub use circuit_benchmarks::taiko_super_circuit::{evm_verify, gen_verifier};
+    pub use snark_verifier::loader::evm;
+    pub use zkevm_circuits::root_circuit::taiko_aggregation::AccumulationSchemeType;
+    pub use zkevm_circuits::root_circuit::Config;
+}
+
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::plonk::Circuit;
 use halo2_proofs::plonk::{keygen_pk, keygen_vk};
@@ -16,14 +24,14 @@ use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::SerdeFormat;
 use hyper::Uri;
 use rand::{thread_rng, Rng};
-use snark_verifier::loader::evm;
+
 use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
-use snark_verifier_sdk::GWC;
+
 use snark_verifier_sdk::evm::gen_evm_proof_gwc;
 use snark_verifier_sdk::halo2::gen_snark_gwc;
 use snark_verifier_sdk::CircuitExt;
-use zkevm_circuits::root_circuit::Config;
-use zkevm_circuits::root_circuit::pcd_aggregation::AccumulationSchemeType;
+use snark_verifier_sdk::GWC;
+
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs::File;
@@ -33,11 +41,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
-use zkevm_circuits::root_circuit::PCDAggregationCircuit;
+use zkevm_circuits::root_circuit::TaikoAggregationCircuit;
 use zkevm_circuits::util::SubCircuit;
 use zkevm_common::json_rpc::jsonrpc_request_client;
 use zkevm_common::prover::*;
-use circuit_benchmarks::super_circuit::{gen_verifier, evm_verify};
 use lazy_static::lazy_static;
 const RETRY: usize = 3;
 

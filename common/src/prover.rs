@@ -1,6 +1,7 @@
+use bus_mapping::circuit_input_builder::{ProtocolInstance, protocol_instance::{Transition, BlockMetadata}};
 use eth_types::{Address, Bytes, H256};
 use serde::{Deserialize, Serialize};
-use zkevm_circuits::witness::ProtocolInstance;
+// use zkevm_circuits::witness::ProtocolInstance;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ProofResult {
@@ -71,7 +72,7 @@ pub struct RequestExtraInstance {
     /// l2 contract address
     pub l2_contract: String,
     /// meta hash
-    pub meta_hash: String,
+    pub request_meta_data: RequestMetaData,
     /// block hash value
     pub block_hash: String,
     /// the parent block hash
@@ -82,6 +83,8 @@ pub struct RequestExtraInstance {
     pub graffiti: String,
     /// Prover address
     pub prover: String,
+    /// treasury
+    pub treasury: String,
     /// gas used
     pub gas_used: u32,
     /// parent gas used
@@ -92,6 +95,43 @@ pub struct RequestExtraInstance {
     pub max_transactions_per_block: u64,
     /// maxBytesPerTxList
     pub max_bytes_per_tx_list: u64,
+    /// anchor_gas_limit
+    pub anchor_gas_limit: u64,
+}
+
+/// l1 meta hash
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestMetaData {
+    /// meta id
+    pub id: u64,
+    /// meta timestamp
+    pub timestamp: u64,
+    /// l1 block height
+    pub l1_height: u64,
+    /// l1 block hash
+    pub l1_hash: String,
+    /// deposits processed
+    pub deposits_hash: String,
+    /// tx list hash
+    pub blob_hash: String,
+    /// tx list byte start
+    pub tx_list_byte_offset: u32, // u24
+    /// tx list byte end
+    pub tx_list_byte_size: u32, // u24
+    /// gas limit
+    pub gas_limit: u32,
+    /// coinbase
+    pub coinbase: String,
+    // difficulty
+    pub difficulty: String,
+    // extraData
+    pub extra_data: String,
+    // minTier
+    pub min_tier: u16,
+    // blobUsed
+    pub blob_used: bool,
+    /// previous meta hash
+    pub parent_metahash: String,
 }
 
 impl PartialEq for RequestExtraInstance {
@@ -99,6 +139,7 @@ impl PartialEq for RequestExtraInstance {
         self.l1_signal_service == other.l1_signal_service
             && self.l2_signal_service == other.l2_signal_service
             && self.l2_contract == other.l2_contract
+            && self.request_meta_data == other.request_meta_data
             && self.meta_hash == other.meta_hash
             && self.block_hash == other.block_hash
             && self.parent_hash == other.parent_hash
@@ -113,8 +154,8 @@ impl PartialEq for RequestExtraInstance {
     }
 }
 
-fn parse_hash(input: &str) -> H256 {
-    H256::from_slice(&hex::decode(input).expect("parse_hash"))
+fn parse_hash(input: &str) -> [u8; 32] {
+    H256::from_slice(&hex::decode(input).expect("parse_hash")).as_fixed_bytes().clone()
 }
 
 fn parse_address(input: &str) -> Address {
@@ -124,20 +165,30 @@ fn parse_address(input: &str) -> Address {
 impl From<RequestExtraInstance> for ProtocolInstance {
     fn from(instance: RequestExtraInstance) -> Self {
         ProtocolInstance {
-            l1_signal_service: parse_address(&instance.l1_signal_service),
-            l2_signal_service: parse_address(&instance.l2_signal_service),
-            l2_contract: parse_address(&instance.l2_contract),
-            meta_hash: parse_hash(&instance.meta_hash),
-            block_hash: parse_hash(&instance.block_hash),
-            parent_hash: parse_hash(&instance.parent_hash),
-            signal_root: parse_hash(&instance.signal_root),
-            graffiti: parse_hash(&instance.graffiti),
+            transition: Transition {
+                parentHash: parse_hash(&instance.parent_hash).into(),
+                blockHash: parse_hash(&instance.block_hash).into(),    // constrain: l2 block hash
+                signalRoot:  parse_hash(&instance.signal_root).into(), // constrain: ??l2 service account storage root??
+                graffiti: parse_hash(&instance.graffiti).into(),
+            },
+            block_metadata: BlockMetadata {
+                l1Hash: parse_hash(&instance.request_meta_data.l1_hash).into(),
+                difficulty: parse_hash(&instance.request_meta_data.difficulty).into(),
+                blobHash: parse_hash(&instance.request_meta_data.blob_hash).into(),
+                extraData: parse_hash(&instance.request_meta_data.extra_data).into(),
+                depositsHash: parse_hash(&instance.request_meta_data.deposits_hash).into(),
+                coinbase: parse_address(&instance.request_meta_data.coinbase).to_fixed_bytes().into(),
+                id: instance.request_meta_data.id,
+                gasLimit: instance.request_meta_data.gas_limit,
+                timestamp: instance.request_meta_data.timestamp,
+                l1Height: instance.request_meta_data.l1_height,
+                txListByteOffset: instance.request_meta_data.tx_list_byte_offset,
+                txListByteSize: instance.request_meta_data.tx_list_byte_size,
+                minTier: instance.request_meta_data.min_tier,
+                blobUsed: instance.request_meta_data.blob_used,
+                parentMetaHash: parse_hash(&instance.request_meta_data.parent_metahash).into(),
+            },
             prover: parse_address(&instance.prover),
-            gas_used: instance.gas_used,
-            parent_gas_used: instance.parent_gas_used,
-            block_max_gas_limit: instance.block_max_gas_limit,
-            max_transactions_per_block: instance.max_transactions_per_block,
-            max_bytes_per_tx_list: instance.max_bytes_per_tx_list,
         }
     }
 }

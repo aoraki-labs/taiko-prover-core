@@ -827,7 +827,7 @@ dependencies = [
 [[package]]
 name = "ecc"
 version = "0.1.0"
-source = "git+https://github.com/appliedzkp/halo2wrong.git?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
+source = "git+https://github.com/privacy-scaling-explorations/halo2wrong?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
 dependencies = [
  "integer",
  "num-bigint",
@@ -1492,12 +1492,14 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-source = "git+https://github.com/appliedzkp/halo2.git?tag=v2023_04_20#be955686f86eb618f55d2320c0e042485b313d22"
+source = "git+https://github.com/taikoxyz/halo2.git?branch=taiko/unstable#fb69aa2d6c1bc4afaab360adaca40aee69a76ac8"
 dependencies = [
+ "ark-std",
  "blake2b_simd",
  "ff 0.13.0",
  "group 0.13.0",
  "halo2curves",
+ "itertools",
  "rand_chacha",
  "rand_core",
  "rayon",
@@ -1526,7 +1528,7 @@ dependencies = [
 [[package]]
 name = "halo2wrong"
 version = "0.1.0"
-source = "git+https://github.com/appliedzkp/halo2wrong.git?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
+source = "git+https://github.com/privacy-scaling-explorations/halo2wrong?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
 dependencies = [
  "halo2_proofs 0.2.0",
  "num-bigint",
@@ -1795,7 +1797,7 @@ dependencies = [
 [[package]]
 name = "integer"
 version = "0.1.0"
-source = "git+https://github.com/appliedzkp/halo2wrong.git?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
+source = "git+https://github.com/privacy-scaling-explorations/halo2wrong?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
 dependencies = [
  "maingate",
  "num-bigint",
@@ -1995,7 +1997,7 @@ checksum = "518ef76f2f87365916b142844c16d8fefd85039bc5699050210a7778ee1cd1de"
 [[package]]
 name = "maingate"
 version = "0.1.0"
-source = "git+https://github.com/appliedzkp/halo2wrong.git?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
+source = "git+https://github.com/privacy-scaling-explorations/halo2wrong?tag=v2023_04_20#f72db265aa3cebe297c9b9816e940d0e1d400886"
 dependencies = [
  "halo2wrong",
  "num-bigint",
