@@ -140,7 +140,6 @@ impl PartialEq for RequestExtraInstance {
             && self.l2_signal_service == other.l2_signal_service
             && self.l2_contract == other.l2_contract
             && self.request_meta_data == other.request_meta_data
-            && self.meta_hash == other.meta_hash
             && self.block_hash == other.block_hash
             && self.parent_hash == other.parent_hash
             && self.signal_root == other.signal_root

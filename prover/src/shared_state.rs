@@ -82,7 +82,7 @@ fn get_param_path(path: &String, k: usize) -> PathBuf {
 //read the kzg param file
 fn get_or_gen_param_core(k:usize) -> (Arc<ProverParams>, String) {
     let path = format!("./kzg_bn254_{}.srs", k);
-    let file = File::open(&path).expect("open exist param successfully");
+    let file = File::open(&path).expect(&format!("couldn't open path {:?}", path));
     let params = Arc::new(
         ProverParams::read(&mut std::io::BufReader::new(file))
             .expect("Failed to read params"),
@@ -135,7 +135,7 @@ pub async fn generate_witness(request: &ProofRequestOptions) -> Result<CircuitWi
 
 
 pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: String, l1_signal_service:String ,l2_signal_service:String ,taiko_12:String ,
-    meta_hash: String, blockhash: String, parenthash:String ,signalroot:String ,graffiti:String ,gasused:u64 ,parentgasused:u64,blockmaxgasimit:u64,maxtransactionsperblock:u64,maxbytespertxlist:u64) -> Result<ProofResult,String>{
+    request_meta_data: RequestMetaData, blockhash: String, parenthash:String ,signalroot:String ,graffiti:String ,gasused:u64 ,parentgasused:u64,blockmaxgasimit:u64,maxtransactionsperblock:u64,maxbytespertxlist:u64) -> Result<ProofResult,String>{
 
     let mut request_extra_instance=RequestExtraInstance::default();
     let mut task_options=ProofRequestOptions::default();
@@ -143,7 +143,7 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     request_extra_instance.l1_signal_service=l1_signal_service;
     request_extra_instance.l2_signal_service=l2_signal_service;
     request_extra_instance.l2_contract=taiko_12;
-    request_extra_instance.meta_hash=meta_hash; 
+    request_extra_instance.request_meta_data=request_meta_data; 
     request_extra_instance.block_hash=blockhash; 
     request_extra_instance.parent_hash=parenthash;
     request_extra_instance.signal_root=signalroot;
@@ -229,7 +229,7 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     aggregation_proof.k = agg_params.k() as u8;
     let agg_circuit = {
         let time_started = Instant::now();
-        let v = PCDAggregationCircuit::<GWC>::new(&agg_params, [snark]).unwrap();
+        let v = TaikoAggregationCircuit::<GWC>::new(&agg_params, [snark]).unwrap();
         aggregation_proof.aux.circuit =
                     Instant::now().duration_since(time_started).as_millis() as u32;
         v
@@ -248,23 +248,30 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     aggregation_proof.instance = collect_instance_hex(&agg_instance);
     let proof = {
         let time_started = Instant::now();
-        let num_instances = agg_circuit.num_instance().clone();
-        let instances = agg_circuit.instance().clone();
-        let accumulator_indices = Some(agg_circuit.accumulator_indices());
+        #[cfg(feature = "evm-verifier")]
+        let (num_instances, instances, accumulator_indices) = {
+            (
+                agg_circuit.num_instance().clone(),
+                agg_circuit.instance().clone(),
+                Some(agg_circuit.accumulator_indices()),
+            )
+        };
+        
         let v = gen_evm_proof_gwc(&agg_params, &agg_pk, agg_circuit, agg_instance);
-        #[cfg(feature = "evm_verifier")]
+        #[cfg(feature = "evm-verifier")]
         {
-            let deployment_code = gen_verifier(
+            let deployment_code = evm_verifier_helper::gen_verifier(
                 &agg_params,
                 &agg_pk.get_vk(),
-                Config::kzg()
+                evm_verifier_helper::Config::kzg()
                     .with_num_instance(num_instances.clone())
                     .with_accumulator_indices(accumulator_indices),
                 num_instances,
-                AccumulationSchemeType::GwcType,
+                evm_verifier_helper::AccumulationSchemeType::GwcType,
             );
-            let evm_verifier_bytecode = evm::compile_yul(&deployment_code);
-            evm_verify(evm_verifier_bytecode, instances, v.clone());
+            let evm_verifier_bytecode =
+                evm_verifier_helper::evm::compile_solidity(&deployment_code);
+            evm_verifier_helper::evm_verify(evm_verifier_bytecode, instances, v.clone());
         }
         aggregation_proof.aux.proof =
             Instant::now().duration_since(time_started).as_millis() as u32;
@@ -387,7 +394,7 @@ async fn compute_proof<C: Circuit<Fr> + Clone + SubCircuit<Fr> + CircuitExt<Fr>>
             aggregation_proof.k = agg_params.k() as u8;
             let agg_circuit = {
                 let time_started = Instant::now();
-                let v = PCDAggregationCircuit::<GWC>::new(&agg_params, [snark]).unwrap();
+                let v = TaikoAggregationCircuit::<GWC>::new(&agg_params, [snark]).unwrap();
                 aggregation_proof.aux.circuit =
                     Instant::now().duration_since(time_started).as_millis() as u32;
                 v
@@ -648,7 +655,7 @@ impl SharedState {
             let self_copy = self.clone();
 
             tokio::spawn(async move {
-                let witness = CircuitWitness::dummy_with_request(&task_options_copy)
+                let witness = CircuitWitness::from_request(&task_options_copy)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -991,10 +998,11 @@ impl SharedState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use env_logger::Env;
     use eth_types::Address;
-    use eth_types::H256;
     use eth_types::ToBigEndian;
     use eth_types::ToWord;
+    use eth_types::H256;
     use ethers_core::abi::encode;
     use ethers_core::abi::Token;
     use ethers_core::utils::keccak256;
@@ -1004,19 +1012,19 @@ mod test {
         H256::from_slice(&hex::decode(input).expect("parse_hash"))
     }
 
-     fn parse_address(input: &str) -> Address {
+    fn parse_address(input: &str) -> Address {
         Address::from_slice(&hex::decode(input).expect("parse_address"))
     }
 
     #[test]
     fn test_abi_enc_hash() {
-            let meta_hash   = "e7c4698134a4c5dce0c885ea9e202be298537756bb363750256ed0c5a603ff11";
-            let block_hash  = "b58dfe193fb44bd3b99398910ffc3da6176665617aff46bcf9bc218fb87a0ebd";
-            let parent_hash = "2d6ff9593ec597e5d90752ea68f43ba69df5b89ab17eadbbdcdd3e11b7e17ea3";
-            let signal_root = "25f5352342833794e6c468e5818cd88163fff61963891a7237a48567cb88b597";
-            let graffiti = "6162630000000000000000000000000000000000000000000000000000000000";
-            let prover = "70997970C51812dc3A010C7d01b50e0d17dc79C8";
-
+        let meta_hash = "e7c4698134a4c5dce0c885ea9e202be298537756bb363750256ed0c5a603ff11";
+        let block_hash = "b58dfe193fb44bd3b99398910ffc3da6176665617aff46bcf9bc218fb87a0ebd";
+        let parent_hash = "2d6ff9593ec597e5d90752ea68f43ba69df5b89ab17eadbbdcdd3e11b7e17ea3";
+        let signal_root = "25f5352342833794e6c468e5818cd88163fff61963891a7237a48567cb88b597";
+        let graffiti = "6162630000000000000000000000000000000000000000000000000000000000";
+        let prover = "70997970C51812dc3A010C7d01b50e0d17dc79C8";
+        
         let pi = Token::FixedArray(vec![
             Token::FixedBytes(parse_hash(meta_hash).to_word().to_be_bytes().into()),
             Token::FixedBytes(parse_hash(parent_hash).to_word().to_be_bytes().into()),
@@ -1034,51 +1042,69 @@ mod test {
     #[tokio::test]
     async fn test_dummy_proof_gen() -> Result<(), String> {
         let ss = SharedState::new("1234".to_owned(), None);
-        const CIRCUIT_CONFIG: CircuitConfig = crate::match_circuit_params!(100, CIRCUIT_CONFIG, {
+        const CIRCUIT_CONFIG: CircuitConfig = crate::match_circuit_params!(1000, CIRCUIT_CONFIG, {
             panic!();
         });
         let protocol_instance = RequestExtraInstance {
-            l1_signal_service: "23baAc3892a823e9E59B85d6c90068474fe60086".to_string(),
+            l1_signal_service: "7a2088a1bFc9d81c55368AE168C2C02570cB814F".to_string(),
             l2_signal_service: "1000777700000000000000000000000000000007".to_string(),
             l2_contract: "1000777700000000000000000000000000000001".to_string(),
-            meta_hash: "ba97517eb3553f0c355d68392493f8b08aaafcd4b05dc6759889c421316cccfb"
+            request_meta_data: RequestMetaData {
+                id: 10,
+                timestamp: 1704868002,
+                l1_height: 75,
+                l1_hash: "910e395cc68a81b201168e745f659785f79415be650116914b36a5564db26344"
+                    .to_string(),
+                deposits_hash: "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+                    .to_string(),
+                blob_hash: "569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd"
+                    .to_string(),
+                tx_list_byte_offset: 0,
+                tx_list_byte_size: 0,
+                gas_limit: 820000000,
+                coinbase: "0000000000000000000000000000000000000000".to_string(),
+                difficulty: "0000000000000000000000000000000000000000000000000000000000000001"
+                    .to_string(),
+                extra_data: "0000000000000000000000000000000000000000000000000000000000000002"
+                    .to_string(),
+                parent_metahash: "0000000000000000000000000000000000000000000000000000000000000003"
+                    .to_string(),
+                ..Default::default()
+            },
+            block_hash: "0aaddb104db39797fdf019dac2d581bf07da9cdcfbffece6a84c894ecded7649"
                 .to_string(),
-            block_hash: "f9101063257478d306ac9d826927eae60c1c9b7db6fd2fe68aa249739221f611"
+            parent_hash: "10d1404faa8517c1bd5cc2931adff7a9a1d89468d9cce386bef6d9fc4ff45663"
                 .to_string(),
-            parent_hash: "cc9e3bcb7273a75b5f5b77c22c7878506eabb2d2308390a717a52d80c63926d8"
+            signal_root: "4863d4338e270b3bd07ed68e084177b2faf9a07546dc644ed2322cbd2431f2ef"
                 .to_string(),
-            signal_root: "d215c65a2b8ffc53f7b7659dc0a5cab2a5044c3cf71524e36e60d8aa8d4bb173"
+            graffiti: "6162630000000000000000000000000000000000000000000000000000000000"
                 .to_string(),
-            graffiti: "0000000000000000000000000000000000000000000000000000000000000000"
-                .to_string(),
-            prover: "6C671d2C641CE1b99F17755fd45441fa4326C3B1".to_string(),
-            gas_used: 1605944,
-            parent_gas_used: 3984953,
+            prover: "70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+            treasury: "df09A0afD09a63fb04ab3573922437e1e637dE8b".to_string(),
+            gas_used: 428118,
+            parent_gas_used: 393811,
             block_max_gas_limit: 6000000,
             max_transactions_per_block: 79,
             max_bytes_per_tx_list: 120000,
+            anchor_gas_limit: 250000,
         };
-
-        let mut dummy_req = ProofRequestOptions {
+        let dummy_req = ProofRequestOptions {
             circuit: "super".to_string(),
-            block: 30,
-            rpc: "https://rpc.internal.taiko.xyz".to_string(),
-            protocol_instance: protocol_instance.clone(),
-            param: Some("../param".to_string()),
-            aggregate: true,
+            block: protocol_instance.request_meta_data.id,
+            rpc: "https://rpc.internal.taiko.xyz/".to_string(),
+            protocol_instance,
+            param: Some("./params".to_string()),
+            aggregate: false,
             retry: true,
-            mock: false,
+            mock: true,
             mock_feedback: false,
             verify_proof: true,
         };
 
-        dummy_req.aggregate = true;
-        dummy_req.param = Some("../param".to_string());
-        dummy_req.protocol_instance = protocol_instance.clone();
-        dummy_req.mock = false;
+        let witness = CircuitWitness::dummy_with_request(&dummy_req)
+            .await
+            .unwrap();
 
-        let mut witness = CircuitWitness::dummy_with_request(&dummy_req).await.unwrap();
-        witness.protocol_instance = protocol_instance.clone().into();
         let super_circuit = gen_super_circuit::<
             { CIRCUIT_CONFIG.max_txs },
             { CIRCUIT_CONFIG.max_calldata },
@@ -1088,6 +1114,192 @@ mod test {
         >(&witness, fixed_rng())
         .unwrap();
 
+        println!("ready to compute proof");
+        let proof = compute_proof(&ss, &dummy_req, CIRCUIT_CONFIG, super_circuit)
+            .await
+            .unwrap();
+        println!("proof={:?}", proof);
+        Ok(())
+    }
+
+    #[warn(dead_code)]
+    fn mock_requests() -> Vec<RequestExtraInstance> {
+        vec![
+            RequestExtraInstance {
+                l1_signal_service: "7a2088a1bFc9d81c55368AE168C2C02570cB814F".to_string(),
+                l2_signal_service: "1000777700000000000000000000000000000007".to_string(),
+                l2_contract: "1000777700000000000000000000000000000001".to_string(),
+                request_meta_data: RequestMetaData {
+                    id: 11,
+                    timestamp: 1704868026,
+                    l1_height: 77,
+                    l1_hash: "02965bc3ea3d929d342c4a67399462ec9d89c9473994ac65dd7a7fa66845211f"
+                        .to_string(),
+                    deposits_hash:
+                        "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+                            .to_string(),
+                    blob_hash: "569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd"
+                        .to_string(),
+                    tx_list_byte_offset: 0,
+                    tx_list_byte_size: 0,
+                    gas_limit: 820000000,
+                    coinbase: "0000000000000000000000000000000000000000".to_string(),
+                    difficulty: "0000000000000000000000000000000000000000000000000000000000000001"
+                        .to_string(),
+                    extra_data: "0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                    parent_metahash:
+                        "0000000000000000000000000000000000000000000000000000000000000003"
+                            .to_string(),
+                    ..Default::default()
+                },
+                block_hash: "3720946bc42d4ebcb7baf61e649be09ae2bc34c13b762e33497208acc43e02e3"
+                    .to_string(),
+                parent_hash: "0aaddb104db39797fdf019dac2d581bf07da9cdcfbffece6a84c894ecded7649"
+                    .to_string(),
+                signal_root: "4863d4338e270b3bd07ed68e084177b2faf9a07546dc644ed2322cbd2431f2ef"
+                    .to_string(),
+                graffiti: "6162630000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                prover: "70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+                treasury: "df09A0afD09a63fb04ab3573922437e1e637dE8b".to_string(),
+                gas_used: 428295,
+                parent_gas_used: 428118,
+                block_max_gas_limit: 6000000,
+                max_transactions_per_block: 79,
+                max_bytes_per_tx_list: 120000,
+                anchor_gas_limit: 250000,
+            },
+            RequestExtraInstance {
+                l1_signal_service: "7a2088a1bFc9d81c55368AE168C2C02570cB814F".to_string(),
+                l2_signal_service: "1000777700000000000000000000000000000007".to_string(),
+                l2_contract: "1000777700000000000000000000000000000001".to_string(),
+                request_meta_data: RequestMetaData {
+                    id: 1025,
+                    timestamp: 1704891642,
+                    l1_height: 2045,
+                    l1_hash: "a922328190762aa743c0d0b494fbac8b4bd9d4e9d4f71415e868ff51d9bc9089"
+                        .to_string(),
+                    deposits_hash:
+                        "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+                            .to_string(),
+                    blob_hash: "569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd"
+                        .to_string(),
+                    tx_list_byte_offset: 0,
+                    tx_list_byte_size: 0,
+                    gas_limit: 820000000,
+                    coinbase: "0000000000000000000000000000000000000000".to_string(),
+                    difficulty: "0000000000000000000000000000000000000000000000000000000000000001"
+                        .to_string(),
+                    extra_data: "0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                    parent_metahash:
+                        "0000000000000000000000000000000000000000000000000000000000000003"
+                            .to_string(),
+                    ..Default::default()
+                },
+                block_hash: "9a30a370dd4632e102b4f96abddf463af97d6f32e055408a665799b9016e7a26"
+                    .to_string(),
+                parent_hash: "811becf8042a9396a87b030e9a84bb0a93c8c7e3f744598e247a6c9c2f286a8f"
+                    .to_string(),
+                signal_root: "24261f85852cd0549ecbc0ca46fcd98e896514c2a9c3a47dde468353e7708bc3"
+                    .to_string(),
+                graffiti: "6162630000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                prover: "70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+                treasury: "df09A0afD09a63fb04ab3573922437e1e637dE8b".to_string(),
+                gas_used: 622033,
+                parent_gas_used: 602133,
+                block_max_gas_limit: 6000000,
+                max_transactions_per_block: 79,
+                max_bytes_per_tx_list: 120000,
+                anchor_gas_limit: 250000,
+            },
+            RequestExtraInstance {
+                l1_signal_service: "7a2088a1bFc9d81c55368AE168C2C02570cB814F".to_string(),
+                l2_signal_service: "1000777700000000000000000000000000000007".to_string(),
+                l2_contract: "1000777700000000000000000000000000000001".to_string(),
+                request_meta_data: RequestMetaData {
+                    id: 4097,
+                    timestamp: 1704963618,
+                    l1_height: 8043,
+                    l1_hash: "a8a5eee03a04c79ed8c9cad3e8c1962d2f649210db7ee8bc16b975814228e153"
+                        .to_string(),
+                    deposits_hash:
+                        "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+                            .to_string(),
+                    blob_hash: "569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd"
+                        .to_string(),
+                    tx_list_byte_offset: 0,
+                    tx_list_byte_size: 0,
+                    gas_limit: 820000000,
+                    coinbase: "0000000000000000000000000000000000000000".to_string(),
+                    difficulty: "0000000000000000000000000000000000000000000000000000000000000001"
+                        .to_string(),
+                    extra_data: "0000000000000000000000000000000000000000000000000000000000000002"
+                        .to_string(),
+                    parent_metahash:
+                        "0000000000000000000000000000000000000000000000000000000000000003"
+                            .to_string(),
+                    ..Default::default()
+                },
+                block_hash: "781ae8afc009d8bb05ff4c6716e34d7d07c7bbbcaffa2134104a1a082d912f48"
+                    .to_string(),
+                parent_hash: "79c360f595e5ff88a5604b60281193b104509b8341e9f62e03848b22c1248cc1"
+                    .to_string(),
+                signal_root: "e0efaaa960175cf549917909206347f7093c10db96d91f757fd8b5aaf4fde872"
+                    .to_string(),
+                graffiti: "6162630000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                prover: "70997970C51812dc3A010C7d01b50e0d17dc79C8".to_string(),
+                treasury: "df09A0afD09a63fb04ab3573922437e1e637dE8b".to_string(),
+                gas_used: 622033,
+                parent_gas_used: 602133,
+                block_max_gas_limit: 6000000,
+                max_transactions_per_block: 79,
+                max_bytes_per_tx_list: 120000,
+                anchor_gas_limit: 250000,
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn test_with_high_degree() -> Result<(), String> {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
+        let test_id = std::env::var("TEST_IDX")
+            .unwrap_or("0".to_string())
+            .parse::<usize>()
+            .unwrap_or(0);
+        let ss = SharedState::new("1234".to_owned(), None);
+        const CIRCUIT_CONFIG: CircuitConfig =
+            crate::match_circuit_params!(10001, CIRCUIT_CONFIG, {
+                panic!();
+            });
+        let protocol_instance = mock_requests()[test_id].clone();
+        let dummy_req = ProofRequestOptions {
+            circuit: "super".to_string(),
+            block: protocol_instance.request_meta_data.id,
+            rpc: "https://rpc.katla.taiko.xyz/".to_string(),
+            protocol_instance,
+            param: Some("./params".to_string()),
+            aggregate: true,
+            retry: true,
+            mock: false,
+            mock_feedback: false,
+            verify_proof: true,
+        };
+
+        let witness = CircuitWitness::from_request(&dummy_req).await.unwrap();
+
+        let super_circuit = gen_super_circuit::<
+            { CIRCUIT_CONFIG.max_txs },
+            { CIRCUIT_CONFIG.max_calldata },
+            { CIRCUIT_CONFIG.max_rws },
+            { CIRCUIT_CONFIG.max_copy_rows },
+            _,
+        >(&witness, fixed_rng())
+        .unwrap();
 
         println!("ready to compute proof");
         let proof = compute_proof(&ss, &dummy_req, CIRCUIT_CONFIG, super_circuit)
