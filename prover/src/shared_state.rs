@@ -54,20 +54,49 @@ lazy_static! {
     };
 }
 
-const TAIKO_A5_CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
+// const TAIKO_A5_CIRCUIT_CONFIG: CircuitConfig = CircuitConfig {
+//     block_gas_limit: 15200000,
+//     max_txs: 80,
+//     max_calldata: 69750,
+//     max_bytecode: 139500,
+//     max_rws: 524280,
+//     max_copy_rows: 52428,
+//     max_exp_steps: 27900,
+//     min_k: 19,
+//     pad_to: 80000,
+//     min_k_aggregation: 22,
+//     keccak_padding: 500000,
+// };
+
+// gas 0..=100
+const TAIKO_A6_CIRCUIT_CONFIG_SMALL: CircuitConfig = CircuitConfig {
     block_gas_limit: 820000,
     max_txs: 80,
     max_calldata: 69750,
     max_bytecode: 139500,
-    max_rws: 3161966,
-    max_copy_rows: 5952002,
+    max_rws: 50000,
+    max_copy_rows: 50000,
     max_exp_steps: 27900,
-    min_k: 18,
-    pad_to: 3161966,
+    min_k: 19,
+    pad_to: 80000,
     min_k_aggregation: 22,
-    keccak_padding: 1600000,
+    keccak_padding: 500000,
 };
 
+// gas 101..=15200000
+const TAIKO_A6_CIRCUIT_CONFIG_BIG: CircuitConfig = CircuitConfig {
+    block_gas_limit: 15200000,
+    max_txs: 80,
+    max_calldata: 69750,
+    max_bytecode: 139500,
+    max_rws: 524280,
+    max_copy_rows: 52428,
+    max_exp_steps: 27900,
+    min_k: 19,
+    pad_to: 80000,
+    min_k_aggregation: 22,
+    keccak_padding: 500000,
+};
 
 
 fn get_param_path(path: &String, k: usize) -> PathBuf {
@@ -179,21 +208,45 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     let mut circuit_proof = ProofResult::default();
     let mut aggregation_proof = ProofResult::default();
 
-    let circuit = gen_super_circuit::<
-    { TAIKO_A5_CIRCUIT_CONFIG.max_txs },
-    { TAIKO_A5_CIRCUIT_CONFIG.max_calldata },
-    { TAIKO_A5_CIRCUIT_CONFIG.max_rws },
-    { TAIKO_A5_CIRCUIT_CONFIG.max_copy_rows },
-    _,>(&witness, fixed_rng()).unwrap();
+    // let circuit = gen_super_circuit::<
+    // { TAIKO_A6_CIRCUIT_CONFIG.max_txs },
+    // { TAIKO_A6_CIRCUIT_CONFIG.max_calldata },
+    // { TAIKO_A6_CIRCUIT_CONFIG.max_rws },
+    // { TAIKO_A6_CIRCUIT_CONFIG.max_copy_rows },
+    // _,>(&witness, fixed_rng()).unwrap();
+    
+    let circuit;
 
-    let universe_k = TAIKO_A5_CIRCUIT_CONFIG.min_k.max(TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation); //22
+    if gasused <= 100 {
+        circuit = gen_super_circuit::<
+            { TAIKO_A6_CIRCUIT_CONFIG_SMALL.max_txs },
+            { TAIKO_A6_CIRCUIT_CONFIG_SMALL.max_calldata },
+            { TAIKO_A6_CIRCUIT_CONFIG_SMALL.max_rws },
+            { TAIKO_A6_CIRCUIT_CONFIG_SMALL.max_copy_rows },
+            _,>(&witness, fixed_rng()).unwrap();
+    } else if gasused >= 101 && gasused <= 15200000 {
+        circuit = gen_super_circuit::<
+            { TAIKO_A6_CIRCUIT_CONFIG_BIG.max_txs },
+            { TAIKO_A6_CIRCUIT_CONFIG_BIG.max_calldata },
+            { TAIKO_A6_CIRCUIT_CONFIG_BIG.max_rws },
+            { TAIKO_A6_CIRCUIT_CONFIG_BIG.max_copy_rows },
+            _,>(&witness, fixed_rng()).unwrap();
+    } else {
+        panic!("Invalid gasused value");
+    }
+
+    let taiko_a6_circuit_config :CircuitConfig = crate::match_circuit_params!(gasused, CIRCUIT_CONFIG, {
+                panic!();
+            });
+
+    let universe_k = taiko_a6_circuit_config.min_k.max(taiko_a6_circuit_config.min_k_aggregation); //22
     // let (base_param, _) = get_or_gen_param(&task_options,universe_k);
     let (base_param, _) = get_or_gen_param_core(universe_k);
     let mut aggregation_param = (*base_param).clone();
     let mut circuit_param = aggregation_param.clone();
 
-    if circuit_param.k() as usize > TAIKO_A5_CIRCUIT_CONFIG.min_k {
-        circuit_param.downsize(TAIKO_A5_CIRCUIT_CONFIG.min_k as u32);
+    if circuit_param.k() as usize > taiko_a6_circuit_config.min_k {
+        circuit_param.downsize(taiko_a6_circuit_config.min_k as u32);
         circuit_proof.k = circuit_param.k() as u8;
     }
     circuit_proof.k = circuit_param.k() as u8;
@@ -220,8 +273,8 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     let snark = gen_snark_gwc(&circuit_param, &pk, circuit, None::<&str>);
     circuit_proof.proof = snark.proof.clone().into();
     
-    if aggregation_param.k() as usize > TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation {
-        aggregation_param.downsize(TAIKO_A5_CIRCUIT_CONFIG.min_k_aggregation as u32);
+    if aggregation_param.k() as usize > taiko_a6_circuit_config.min_k_aggregation {
+        aggregation_param.downsize(taiko_a6_circuit_config.min_k_aggregation as u32);
         aggregation_proof.k = aggregation_param.k() as u8;
     }
 
