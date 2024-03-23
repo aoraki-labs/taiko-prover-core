@@ -8,6 +8,23 @@ lto = "thin"
 [patch."https://github.com/privacy-scaling-explorations/halo2.git"]
 halo2_proofs = { git = "https://github.com/taikoxyz/halo2.git", branch = "taiko/unstable" }
 
+[patch."https://github.com/taikoxyz/halo2wrong.git"]
+halo2wrong = { git = "https://github.com/aoraki-labs/halo2wrong",rev = "07afd1119dd34693a0ad7af0e74b5b2b66d3196f"}
+
+snark-verifier = { git = "https://github.com/taikoxyz/snark-verifier.git", rev = "612f4950197af29883b6e67f9099117318579f99", default-features = false, features = [
+    "loader_halo2",
+    "system_halo2",
+    "loader_evm",
+    "parallel",
+] }
+snark-verifier-sdk = { git = "https://github.com/taikoxyz/snark-verifier.git", rev = "612f4950197af29883b6e67f9099117318579f99", default-features = false, features = [
+    "loader_halo2",
+    "loader_evm",
+    "parallel",
+    "display",
+    "halo2_circuit_params",
+] }
+
 # [patch."https://github.com/privacy-scaling-explorations/halo2curves.git"]
 # halo2_curves = { git = "https://github.com/appliedzkp/halo2curves.git", tag = "0.3.3", package = "halo2curves" }
 

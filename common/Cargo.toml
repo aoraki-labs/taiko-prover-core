@@ -5,14 +5,15 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bus-mapping = { git = "https://github.com/taikoxyz/zkevm-circuits.git ", branch = "feat/for-a6-release", features = [
+bus-mapping = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", features = [
     "test",
 ] }
 
-eth-types = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release", features = [
+eth-types = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", features = [
     "warn-unimplemented",
 ] }
-zkevm-circuits = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release" }
+zkevm-circuits = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc" }
+
 hyper = { version = "0.14.16", features = ["server"] }
 log = "0.4.14"
 serde = { version = "1.0.136", features = ["derive"] }

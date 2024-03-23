@@ -6,26 +6,26 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_04_20" }
-bus-mapping = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release", features = [
+bus-mapping = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", features = [
     "test",
     "disable_l2_trace_block"
 ] }
-eth-types = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release", features = [
+eth-types = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", features = [
     "warn-unimplemented",
 ] }
-zkevm-circuits = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release", features = [
+zkevm-circuits = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", features = [
     "test-circuits",
 ] }
-circuit-benchmarks = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release", features = [
+circuit-benchmarks = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", features = [
     "benches",
 ] }
-snark-verifier = { git = "https://github.com/taikoxyz/snark-verifier.git", branch = "a6-integration", default-features = false, features = [
+snark-verifier = { git = "https://github.com/taikoxyz/snark-verifier.git", rev = "612f4950197af29883b6e67f9099117318579f99", default-features = false, features = [
     "loader_halo2",
     "system_halo2",
     "loader_evm",
     "parallel",
 ] }
-snark-verifier-sdk = { git = "https://github.com/taikoxyz/snark-verifier.git", branch = "a6-integration", default-features = false, features = [
+snark-verifier-sdk = { git = "https://github.com/taikoxyz/snark-verifier.git", rev = "612f4950197af29883b6e67f9099117318579f99", default-features = false, features = [
     "loader_halo2",
     "loader_evm",
     "parallel",
@@ -53,7 +53,7 @@ hex = "0.4.3"
 lazy_static = "1.4.0"
 
 # autogen
-mock = { git = "https://github.com/taikoxyz/zkevm-circuits.git", branch = "feat/for-a6-release", optional = true }
+mock = { git = "https://github.com/aoraki-labs/zkevm-circuits", rev = "b0f50e7839857d9a0fceaaab220655e6aff5b2bc", optional = true }
 ethers-signers = { version = "2.0.0", optional = true }
 zkevm_dev = { path = "../dev", optional = true }
 paste = { version = "1.0.11", optional = true }
