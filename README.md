@@ -7,5 +7,6 @@ Refer to the API of `generate_proof` under `prover/src/shared_state.rs`
 
 # Build & Test
 ```bash
+wget https://storage.googleapis.com/zkevm-circuits-keys/kzg_bn254_22.srs -P ./prover/
 cargo test --release test_generate_proof -- --nocapture
 ```
