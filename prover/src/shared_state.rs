@@ -162,7 +162,6 @@ pub async fn generate_witness(request: &ProofRequestOptions) -> Result<CircuitWi
     }
 }
 
-
 pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: String, l1_signal_service:String ,l2_signal_service:String ,taiko_12:String ,
     request_meta_data: RequestMetaData, blockhash: String, parenthash:String ,signalroot:String ,graffiti:String ,gasused:u64 ,parentgasused:u64,blockmaxgasimit:u64,maxtransactionsperblock:u64,maxbytespertxlist:u64) -> Result<ProofResult,String>{
 
@@ -192,18 +191,18 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     task_options.retry=true;
     task_options.verify_proof=true;
 
-    info!("block task prara is {:?}",task_options);
+    println!("block task prara is {:?}",task_options);
 
-    info!("zkpool:start to generate the witness of block:{:?}",block);
+    println!("zkpool:start to generate the witness of block:{:?}",block);
     let mut witness = match generate_witness(&task_options).await{
         Ok(r) => r,
         Err(e) => {
-            info!("get witness data error of block:{}",block);
+            println!("get witness data error of block:{}",block);
             return Err(e.to_string())
         },
     };
     witness.protocol_instance=request_extra_instance.clone().into();
-    info!("zkpool:end to generate the witness of block:{}",block);
+    println!("zkpool:end to generate the witness of block:{}",block);
 
     let mut circuit_proof = ProofResult::default();
     let mut aggregation_proof = ProofResult::default();
@@ -269,7 +268,7 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
     circuit_proof.instance = collect_instance_hex(&circuit_instance);
 
     //aggregate logic below
-    info!("zkpool:start to create proof of block:{}",block);
+    println!("zkpool:start to create proof of block:{}",block);
     let snark = gen_snark_gwc(&circuit_param, &pk, circuit, None::<&str>);
     circuit_proof.proof = snark.proof.clone().into();
     
@@ -330,7 +329,7 @@ pub async fn generate_proof(l2_endpoint:String, block: u64, prover_address: Stri
             Instant::now().duration_since(time_started).as_millis() as u32;
         v
     };
-    info!("zkpool:end to create proof of block:{}",block);
+    println!("zkpool:end to create proof of block:{}",block);
     aggregation_proof.proof = proof.into();
     Ok(aggregation_proof)
 
@@ -1060,6 +1059,7 @@ mod test {
     use ethers_core::abi::Token;
     use ethers_core::utils::keccak256;
     use hex::ToHex;
+    use std::env;
 
     fn parse_hash(input: &str) -> H256 {
         H256::from_slice(&hex::decode(input).expect("parse_hash"))
@@ -1360,5 +1360,97 @@ mod test {
             .unwrap();
         println!("proof={:?}", proof);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_generate_proof() {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+        println!("Current directory: {:?}", env::current_dir().unwrap());
+        // Set up the input parameters for the generate_proof function
+        let protocol_instance = RequestExtraInstance {
+            l1_signal_service: "08a3f537c4bbe8B6176420f4Cd0C84b02172dC65".to_string(),
+            l2_signal_service: "1670080000000000000000000000000000000005".to_string(),
+            l2_contract: "1670080000000000000000000000000000010001".to_string(),
+            request_meta_data: RequestMetaData {
+                id: 639968,
+                timestamp: 1711327260,
+                l1_height: 1210078,
+                l1_hash: "20267882295d74d4c34559da6115b2aeffdde0701ae5a4d4cf360a8bd83856e0"
+                    .to_string(),
+                deposits_hash: "569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd"
+                    .to_string(),
+                blob_hash: "28deda536cdf3802cc38fe11f3f809ab2bbb7eccfe5de09dcd8cbf31100c8e91"
+                    .to_string(),
+                tx_list_byte_offset: 0,
+                tx_list_byte_size: 27495,
+                gas_limit: 15000000,
+                coinbase: "11968B5b805943a259D93F270323349428e82109".to_string(),
+                difficulty: "81eaa53d1859d7cdf95ea476a0359540e1f65ced65609b223bff4ce42bdc48b1"
+                    .to_string(),
+                extra_data: "302e31382e302d64657600000000000000000000000000000000000000000000"
+                    .to_string(),
+                parent_metahash: "ced7df2158a01f0023317c3f45f67288dd05462b44e470830698715c9aa20732"
+                    .to_string(),
+                min_tier: 100,
+                blob_used: false,
+            },
+            block_hash: "c347503bc81c8d290cd2e0e48daf480d6b97ecc28d58e2ab418ba7522dc2ac7d"
+                .to_string(),
+            parent_hash: "04b1815da341c38d1ea53db80d1f69cb2eb60887788740931462021d71d187d0"
+                .to_string(),
+            signal_root: "5635e3b691fcd332e5abd8f60cb855bee0d540cfd118ce5fc99c2997d81a3c7d"
+                .to_string(),
+            graffiti: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            prover: "73F58DCA2226Bef7c64c69b3EdB1E64AaDcC8D32".to_string(),
+            treasury: "".to_string(),
+            gas_used: 306650,
+            parent_gas_used: 2454017,
+            block_max_gas_limit: 15000000,
+            max_transactions_per_block: 0,
+            max_bytes_per_tx_list: 120000,
+            anchor_gas_limit: 0,
+        };
+        let l2_endpoint = "https://rpc.katla.taiko.xyz/".to_string();
+        let block = 639968;
+        let prover_address = protocol_instance.prover;
+        let l1_signal_service = protocol_instance.l1_signal_service;
+        let l2_signal_service = protocol_instance.l2_signal_service;
+        let taiko_12 = protocol_instance.l2_contract;
+        let request_meta_data = protocol_instance.request_meta_data;
+        let blockhash = protocol_instance.block_hash;
+        let parenthash = protocol_instance.parent_hash;
+        let signalroot = protocol_instance.signal_root;
+        let graffiti = protocol_instance.graffiti;
+        let gasused = protocol_instance.gas_used.into();
+        let parentgasused = protocol_instance.parent_gas_used.into();
+        let blockmaxgasimit = protocol_instance.block_max_gas_limit;
+        let maxtransactionsperblock = protocol_instance.max_transactions_per_block;
+        let maxbytespertxlist = protocol_instance.max_bytes_per_tx_list;
+
+        // Call the generate_proof function
+        let result = generate_proof(
+            l2_endpoint,
+            block,
+            prover_address,
+            l1_signal_service,
+            l2_signal_service,
+            taiko_12,
+            request_meta_data,
+            blockhash,
+            parenthash,
+            signalroot,
+            graffiti,
+            gasused,
+            parentgasused,
+            blockmaxgasimit,
+            maxtransactionsperblock,
+            maxbytespertxlist,
+        )
+        .await;
+
+        // Assert the result
+        assert!(result.is_ok());
+        // Add more assertions if needed
     }
 }
